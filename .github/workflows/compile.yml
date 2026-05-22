@@ -12,16 +12,58 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Compile MQL5
-        uses: denniswilsmann/mql5-compile-action@v1
-        with:
-          filename: Experts/中期汇看盘软件 MT5.mq5
-          output: compiled/
-          compiler_version: 4090
-
-      - name: Show Results
-        if: always()
+      - name: Install Wine and Download MT5
         run: |
-          echo "=== Compiled Files ==="
-          ls -la compiled/ 2>/dev/null || echo "No compiled directory"
-          find . -name "*.ex5" -ls 2>/dev/null || echo "No EX5 files"
+          sudo dpkg --add-architecture i386
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends wine64 wine32 xvfb
+          
+          echo "Downloading MT5..."
+          curl -L -o /tmp/mt5setup.exe "https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe"
+          
+          echo "Installing MT5 via Wine..."
+          export WINEARCH=win64
+          export WINEPREFIX=/tmp/wine-prefix
+          xvfb-run wine /tmp/mt5setup.exe /portable /config=install_path="C:\\MetaTrader5" || true
+          
+          # Wait for installation
+          for i in $(seq 1 120); do
+            if [ -f "$WINEPREFIX/drive_c/MetaTrader5/metaeditor64.exe" ]; then
+              echo "MT5 found!"
+              break
+            fi
+            sleep 5
+          done
+          
+          # Show what we have
+          echo "=== Wine prefix contents ==="
+          ls "$WINEPREFIX/drive_c/" 2>/dev/null || echo "No drive_c"
+          find "$WINEPREFIX/drive_c/" -name "metaeditor64.exe" 2>/dev/null || echo "Not found"
+          find "$WINEPREFIX/drive_c/" -name "*.exe" 2>/dev/null | head -10 || true
+
+      - name: Compile MQ5
+        run: |
+          export WINEPREFIX=/tmp/wine-prefix
+          export MT5_DIR="$WINEPREFIX/drive_c/MetaTrader5"
+          
+          mkdir -p "$MT5_DIR/MQL5/Experts"
+          cp "Experts/"* "$MT5_DIR/MQL5/Experts/" 2>/dev/null || true
+          
+          echo "=== Starting compilation ==="
+          xvfb-run wine "$MT5_DIR/metaeditor64.exe" \
+            /compile:"$MT5_DIR/MQL5/Experts/中期汇看盘软件 MT5.mq5" \
+            /log:compile.log 2>&1 || true
+          
+          echo "=== Compile log ==="
+          cat compile.log 2>/dev/null || echo "No log"
+          
+          echo "=== EX5 files ==="
+          find "$MT5_DIR" -name "*.ex5" 2>/dev/null || echo "No EX5"
+          
+          echo "=== Errors ==="
+          grep -i "error" compile.log 2>/dev/null || echo "No errors in log"
+          
+          if grep -qi "error" compile.log 2>/dev/null; then
+            echo "::error::Compilation failed - check log for details"
+            exit 1
+          fi
