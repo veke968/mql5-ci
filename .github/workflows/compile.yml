@@ -24,22 +24,17 @@ jobs:
 
       - name: Download and Install MT5
         run: |
-          # Download MT5 terminal (not the installer, the portable version)
           curl -L -o /tmp/mt5setup.exe "https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe"
-          
-          # Install MT5 using Wine with xvfb (virtual display)
           export WINEARCH=win64
           export WINEPREFIX=$HOME/.wine-mt5
           xvfb-run -s "-screen 0 1024x768x24" wine /tmp/mt5setup.exe /portable /config=install_path="C:\\MetaTrader5" || true
           
-          # Wait for installation to complete
           for i in $(seq 1 60); do
             if [ -f "$WINEPREFIX/drive_c/MetaTrader5/metaeditor64.exe" ]; then
               echo "MT5 installation found!"
-              ls -la "$WINEPREFIX/drive_c/MetaTrader5/metaeditor64.exe"
               break
             fi
-            echo "Waiting for installation... ($i/60)"
+            echo "Waiting... ($i/60)"
             sleep 10
           done
 
@@ -48,30 +43,26 @@ jobs:
           export WINEPREFIX=$HOME/.wine-mt5
           MT5_DIR="$WINEPREFIX/drive_c/MetaTrader5"
           
-          echo "MT5 directory contents:"
-          ls -la "$MT5_DIR/" | head -20
-          
-          echo "MQL5 directory structure:"
-          ls -la "$MT5_DIR/MQL5/" 2>/dev/null || echo "MQL5 dir not found"
-          ls -la "$MT5_DIR/MQL5/Experts/" 2>/dev/null || echo "Experts dir not found"
-          ls -la "$MT5_DIR/MQL5/Include/" 2>/dev/null || echo "Include dir not found"
-          ls -la "$MT5_DIR/MQL5/Libraries/" 2>/dev/null || echo "Libraries dir not found"
-          
-          # Create proper MQL5 structure if needed
           mkdir -p "$MT5_DIR/MQL5/Experts"
           cp "Experts/"* "$MT5_DIR/MQL5/Experts/" 2>/dev/null || true
           
-          echo "Compiling..."
+          echo "=== Starting Compilation ==="
           xvfb-run -s "-screen 0 1024x768x24" wine "$MT5_DIR/metaeditor64.exe" \
             /compile:"$MT5_DIR/MQL5/Experts/中期汇看盘软件 MT5.mq5" \
-            /log:compile.log \
-            2>&1 || true
-            
-          echo "=== Compile Log ==="
-          cat compile.log 2>/dev/null || echo "No compile log generated"
+            /log:compile.log
           
-          echo "=== EX5 Files ==="
-          find "$MT5_DIR" -name "*.ex5" -ls 2>/dev/null || echo "No EX5 files found"
+          echo "=== Compile Log ==="
+          cat compile.log 2>/dev/null || echo "No compile log"
+          
+          echo "=== Check for EX5 ==="
+          find "$MT5_DIR" -name "*.ex5" -ls 2>/dev/null || echo "No EX5 found"
+          
+          # Check for errors in log
+          if grep -qi "error" compile.log 2>/dev/null; then
+            echo "=== ERRORS FOUND ==="
+            grep -i "error" compile.log
+            exit 1
+          fi
 
       - name: Upload Results
         if: always()
