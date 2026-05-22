@@ -8,42 +8,20 @@ on:
 jobs:
   compile:
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/dingmaotu/mql5-action:latest
-
+    
     steps:
       - uses: actions/checkout@v4
 
-      - name: Compile MQ5
+      - name: Compile MQL5
+        uses: denniswilsmann/mql5-compile-action@v1
+        with:
+          filename: Experts/中期汇看盘软件 MT5.mq5
+          output: compiled/
+          compiler_version: 4090
+
+      - name: Show Results
+        if: always()
         run: |
-          echo "=== Wine version ==="
-          wine --version || true
-          
-          echo "=== MT5 path ==="
-          find / -name "metaeditor64.exe" 2>/dev/null | head -5
-          
-          echo "=== Starting Compilation ==="
-          # Find MT5 installation
-          MT5_PATH=$(find / -name "metaeditor64.exe" 2>/dev/null | head -1 | xargs dirname)
-          echo "MT5 at: $MT5_PATH"
-          
-          if [ -n "$MT5_PATH" ]; then
-            echo "Compiling..."
-            wine "$MT5_PATH/metaeditor64.exe" /compile:"Experts/中期汇看盘软件 MT5.mq5" /log:compile.log 2>&1 || true
-            
-            echo "=== Compile Log ==="
-            cat compile.log 2>/dev/null || echo "No compile log"
-            
-            echo "=== EX5 Files ==="
-            find . -name "*.ex5" -ls 2>/dev/null || echo "No EX5 found"
-            
-            if grep -qi "error" compile.log 2>/dev/null; then
-              echo "=== ERRORS ==="
-              grep -i "error" compile.log
-            fi
-          else
-            echo "ERROR: metaeditor64.exe not found in container!"
-            echo "Available wine paths:"
-            ls -la /root/.wine/drive_c/ 2>/dev/null || true
-            ls -la /home/*/.wine/drive_c/ 2>/dev/null || true
-          fi
+          echo "=== Compiled Files ==="
+          ls -la compiled/ 2>/dev/null || echo "No compiled directory"
+          find . -name "*.ex5" -ls 2>/dev/null || echo "No EX5 files"
