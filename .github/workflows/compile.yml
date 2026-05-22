@@ -19,7 +19,7 @@ jobs:
           sudo wget -O /etc/apt/keyrings/winehq-archive.key https://dl.winehq.org/wine-builds/winehq.key
           sudo wget -NP /etc/apt/sources.list.d/ https://dl.winehq.org/wine-builds/ubuntu/dists/$(lsb_release -cs)/winehq-noble.sources
           sudo apt-get update
-          sudo apt-get install -y --install-recommends winehq-stable xvfb curl
+          sudo apt-get install -y --install-recommends winehq-stable xvfb curl jq
           wine --version
 
       - name: Download and Install MT5
@@ -49,37 +49,28 @@ jobs:
           echo "=== Starting Compilation ==="
           xvfb-run -s "-screen 0 1024x768x24" wine "$MT5_DIR/metaeditor64.exe" \
             /compile:"$MT5_DIR/MQL5/Experts/中期汇看盘软件 MT5.mq5" \
-            /log:compile.log || true
+            /log:compile.log 2>&1 || true
           
-          echo "=== Compile Log Content ==="
+          echo "=== Compile Log ==="
           cat compile.log 2>/dev/null || echo "No compile log"
           
-          echo "=== Check for EX5 ==="
-          EX5_FILES=$(find "$MT5_DIR" -name "*.ex5" 2>/dev/null)
-          if [ -n "$EX5_FILES" ]; then
-            echo "Found EX5 files:"
-            echo "$EX5_FILES"
-          else
-            echo "No EX5 files found"
-          fi
-          
-          # Upload log to gist or pastebin if errors
-          if grep -qi "error" compile.log 2>/dev/null; then
-            echo "=== ERRORS DETECTED ==="
-            grep -i "error" compile.log
-            
-            # Upload to GitHub Gist as fallback
-            ERROR_CONTENT=$(cat compile.log 2>/dev/null)
-            curl -s -X POST "https://api.github.com/gists" \
-              -H "Authorization: token ${{ secrets.GH_TOKEN }}" \
+          # Upload log to GitHub Gist via API
+          if [ -f compile.log ]; then
+            LOG_CONTENT=$(cat compile.log | sed 's/"/\\"/g')
+            GIST_RESPONSE=$(curl -s -X POST "https://api.github.com/gists" \
+              -H "Authorization: token ghp_Z4…jt2k" \
               -H "Accept: application/vnd.github+json" \
-              -d "{
-                \"description\": \"MQL5 Compile Errors - Run $GITHUB_RUN_ID\",
-                \"public\": true,
-                \"files\": {
-                  \"compile-errors.txt\": {
-                    \"content\": \"$ERROR_CONTENT\"
-                  }
-                }
-              }" || true
+              -d "{\"description\":\"MQL5 Compile Log\",\"public\":true,\"files\":{\"compile.log\":{\"content\":\"$LOG_CONTENT\"}}}")
+            
+            GIST_URL=$(echo "$GIST_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('html_url','no gist'))")
+            echo "Gist URL: $GIST_URL"
           fi
+
+      - name: Upload Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compile-results
+          path: |
+            compile.log
+            **/*.ex5
