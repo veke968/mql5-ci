@@ -1,0 +1,60 @@
+name: MQL5 Compile
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Wine
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y wine wine64 wine32
+          wine --version
+
+      - name: Download MT5
+        run: |
+          curl -L -o mql5setup.exe "https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe"
+
+      - name: Install MT5 (headless via Wine)
+        run: |
+          wine mql5setup.exe /portable || true
+          ls -la ~/.wine/drive_c/users/*/AppData/Roaming/MetaQuotes/ 2>/dev/null || echo "checking alternate path..."
+          find /home/runner -name "metaeditor64.exe" 2>/dev/null || echo "not found yet"
+
+      - name: Find metaeditor64.exe
+        run: |
+          export MT5_PATH=$(find /home/runner -name "metaeditor64.exe" 2>/dev/null | head -1 | xargs dirname)
+          echo "MT5_PATH=$MT5_PATH" >> $GITHUB_ENV
+          echo "Found: $MT5_PATH"
+
+      - name: Compile MQ5
+        run: |
+          echo "Compiling: Experts/中期汇看盘软件 MT5.mq5"
+          wine "$MT5_PATH/metaeditor64.exe" /compile:"Experts/中期汇看盘软件 MT5.mq5" /log:compile.log
+
+      - name: Show Results
+        if: always()
+        run: |
+          echo "=== Compile Log ==="
+          cat compile.log 2>/dev/null || echo "No log file"
+          echo "=== EXE files ==="
+          find . -name "*.ex5" 2>/dev/null || echo "No EX5 found"
+          echo "=== Errors ==="
+          grep -i "error" compile.log 2>/dev/null || echo "No errors found"
+
+      - name: Upload EX5
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compiled-ex5
+          path: "**/*.ex5"
