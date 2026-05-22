@@ -12,42 +12,66 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Wine
+      - name: Setup Wine
         run: |
           sudo dpkg --add-architecture i386
+          sudo mkdir -pm755 /etc/apt/keyrings
+          sudo wget -O /etc/apt/keyrings/winehq-archive.key https://dl.winehq.org/wine-builds/winehq.key
+          sudo wget -NP /etc/apt/sources.list.d/ https://dl.winehq.org/wine-builds/ubuntu/dists/$(lsb_release -cs)/winehq-noble.sources
           sudo apt-get update
-          sudo apt-get install -y wine wine64 wine32 xvfb
+          sudo apt-get install -y --install-recommends winehq-stable xvfb
           wine --version
 
-      - name: Download MT5 Installer
+      - name: Download and Install MT5
         run: |
+          # Download MT5 terminal (not the installer, the portable version)
           curl -L -o /tmp/mt5setup.exe "https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe"
-          ls -la /tmp/mt5setup.exe
-
-      - name: Install MT5 in Wine
-        run: |
-          xvfb-run wine /tmp/mt5setup.exe /portable || true
-          sleep 30
-          # Find MT5 installation
-          find $HOME -name "metaeditor64.exe" 2>/dev/null | head -5
-
-      - name: Find MT5 Path
-        id: find-mt5
-        run: |
-          MT5_PATH=$(find $HOME -name "metaeditor64.exe" 2>/dev/null | head -1 | xargs dirname)
-          echo "MT5_PATH=$MT5_PATH" >> $GITHUB_OUTPUT
-          echo "Found MT5 at: $MT5_PATH"
+          
+          # Install MT5 using Wine with xvfb (virtual display)
+          export WINEARCH=win64
+          export WINEPREFIX=$HOME/.wine-mt5
+          xvfb-run -s "-screen 0 1024x768x24" wine /tmp/mt5setup.exe /portable /config=install_path="C:\\MetaTrader5" || true
+          
+          # Wait for installation to complete
+          for i in $(seq 1 60); do
+            if [ -f "$WINEPREFIX/drive_c/MetaTrader5/metaeditor64.exe" ]; then
+              echo "MT5 installation found!"
+              ls -la "$WINEPREFIX/drive_c/MetaTrader5/metaeditor64.exe"
+              break
+            fi
+            echo "Waiting for installation... ($i/60)"
+            sleep 10
+          done
 
       - name: Compile MQ5
         run: |
-          echo "Compiling file..."
-          xvfb-run wine "${{ steps.find-mt5.outputs.MT5_PATH }}/metaeditor64.exe" /compile:"Experts/中期汇看盘软件 MT5.mq5" /log:compile.log /include:"$HOME/.wine/drive_c/users/runner/AppData/Roaming/MetaQuotes/Terminal/Common" || true
+          export WINEPREFIX=$HOME/.wine-mt5
+          MT5_DIR="$WINEPREFIX/drive_c/MetaTrader5"
+          
+          echo "MT5 directory contents:"
+          ls -la "$MT5_DIR/" | head -20
+          
+          echo "MQL5 directory structure:"
+          ls -la "$MT5_DIR/MQL5/" 2>/dev/null || echo "MQL5 dir not found"
+          ls -la "$MT5_DIR/MQL5/Experts/" 2>/dev/null || echo "Experts dir not found"
+          ls -la "$MT5_DIR/MQL5/Include/" 2>/dev/null || echo "Include dir not found"
+          ls -la "$MT5_DIR/MQL5/Libraries/" 2>/dev/null || echo "Libraries dir not found"
+          
+          # Create proper MQL5 structure if needed
+          mkdir -p "$MT5_DIR/MQL5/Experts"
+          cp "Experts/"* "$MT5_DIR/MQL5/Experts/" 2>/dev/null || true
+          
+          echo "Compiling..."
+          xvfb-run -s "-screen 0 1024x768x24" wine "$MT5_DIR/metaeditor64.exe" \
+            /compile:"$MT5_DIR/MQL5/Experts/中期汇看盘软件 MT5.mq5" \
+            /log:compile.log \
+            2>&1 || true
+            
           echo "=== Compile Log ==="
-          cat compile.log 2>/dev/null || echo "No compile log"
+          cat compile.log 2>/dev/null || echo "No compile log generated"
+          
           echo "=== EX5 Files ==="
-          find . -name "*.ex5" -ls 2>/dev/null || echo "No EX5 found"
-          echo "=== Error Summary ==="
-          grep -i "error\|warning" compile.log 2>/dev/null || echo "No errors in log"
+          find "$MT5_DIR" -name "*.ex5" -ls 2>/dev/null || echo "No EX5 files found"
 
       - name: Upload Results
         if: always()
