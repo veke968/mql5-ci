@@ -26,7 +26,6 @@ jobs:
           export WINEPREFIX=/tmp/wine-prefix
           xvfb-run wine /tmp/mt5setup.exe /portable /config=install_path="C:\\MetaTrader5" || true
           
-          # Wait for installation
           for i in $(seq 1 120); do
             if [ -f "$WINEPREFIX/drive_c/MetaTrader5/metaeditor64.exe" ]; then
               echo "MT5 found!"
@@ -35,13 +34,12 @@ jobs:
             sleep 5
           done
           
-          # Show what we have
-          echo "=== Wine prefix contents ==="
-          ls "$WINEPREFIX/drive_c/" 2>/dev/null || echo "No drive_c"
+          echo "=== Wine prefix ==="
           find "$WINEPREFIX/drive_c/" -name "metaeditor64.exe" 2>/dev/null || echo "Not found"
           find "$WINEPREFIX/drive_c/" -name "*.exe" 2>/dev/null | head -10 || true
 
       - name: Compile MQ5
+        id: compile
         run: |
           export WINEPREFIX=/tmp/wine-prefix
           export MT5_DIR="$WINEPREFIX/drive_c/MetaTrader5"
@@ -54,16 +52,25 @@ jobs:
             /compile:"$MT5_DIR/MQL5/Experts/中期汇看盘软件 MT5.mq5" \
             /log:compile.log 2>&1 || true
           
+          LOG=$(cat compile.log 2>/dev/null || echo "No log")
+          echo "log<<LOGEOF" >> $GITHUB_OUTPUT
+          echo "$LOG" >> $GITHUB_OUTPUT
+          echo "LOGEOF" >> $GITHUB_OUTPUT
+          
           echo "=== Compile log ==="
-          cat compile.log 2>/dev/null || echo "No log"
+          echo "$LOG"
           
           echo "=== EX5 files ==="
           find "$MT5_DIR" -name "*.ex5" 2>/dev/null || echo "No EX5"
           
-          echo "=== Errors ==="
-          grep -i "error" compile.log 2>/dev/null || echo "No errors in log"
-          
-          if grep -qi "error" compile.log 2>/dev/null; then
-            echo "::error::Compilation failed - check log for details"
+          if echo "$LOG" | grep -qi "error"; then
+            echo "=== Compilation FAILED ==="
             exit 1
           fi
+
+      - name: Upload Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compile-log
+          path: compile.log
