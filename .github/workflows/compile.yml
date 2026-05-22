@@ -34,7 +34,6 @@ jobs:
             sleep 5
           done
           
-          echo "=== Wine prefix ==="
           find "$WINEPREFIX/drive_c/" -name "metaeditor64.exe" 2>/dev/null || echo "Not found"
           find "$WINEPREFIX/drive_c/" -name "*.exe" 2>/dev/null | head -10 || true
 
@@ -52,25 +51,24 @@ jobs:
             /compile:"$MT5_DIR/MQL5/Experts/中期汇看盘软件 MT5.mq5" \
             /log:compile.log 2>&1 || true
           
-          LOG=$(cat compile.log 2>/dev/null || echo "No log")
-          echo "log<<LOGEOF" >> $GITHUB_OUTPUT
-          echo "$LOG" >> $GITHUB_OUTPUT
-          echo "LOGEOF" >> $GITHUB_OUTPUT
-          
           echo "=== Compile log ==="
-          echo "$LOG"
+          cat compile.log 2>/dev/null || echo "No log"
           
           echo "=== EX5 files ==="
           find "$MT5_DIR" -name "*.ex5" 2>/dev/null || echo "No EX5"
           
-          if echo "$LOG" | grep -qi "error"; then
-            echo "=== Compilation FAILED ==="
+          # Upload log to GitHub issue using GITHUB_TOKEN
+          if [ -f compile.log ]; then
+            LOG=$(cat compile.log)
+            echo "Uploading compile log to GitHub issue..."
+            curl -s -X POST \
+              "https://api.github.com/repos/veke968/mql5-ci/issues" \
+              -H "Authorization: Bearer $GITHUB_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              -d "{\"title\":\"MQL5 Compile Log - $(date +%Y%m%d_%H%M%S)\",\"body\":\"Compile log:\\n\`\`\`\\n$LOG\\n\`\`\`\"}" || true
+          fi
+          
+          if grep -qi "error" compile.log 2>/dev/null; then
+            echo "::error::Compilation failed"
             exit 1
           fi
-
-      - name: Upload Log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: compile-log
-          path: compile.log
