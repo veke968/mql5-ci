@@ -35,60 +35,60 @@ jobs:
           wait $WINE_PID 2>/dev/null || true
           
           if [ ! -f "/tmp/wine-prefix/drive_c/MetaTrader5/metaeditor64.exe" ]; then
-            echo "MT5_INSTALL_FAILED" > /tmp/compile_result.txt
-            exit 0  # Don't fail here, we'll report it
+            echo "MT5 installation FAILED - metaeditor64.exe not found"
+            echo "Checking what's in drive_c:"
+            ls -la /tmp/wine-prefix/drive_c/ 2>/dev/null || echo "drive_c does not exist"
+            find /tmp/wine-prefix/ -name "*.exe" 2>/dev/null | head -20 || echo "No exe files"
+            mkdir -p /tmp/mql5-ci-output
+            echo "MT5安装失败 - metaeditor64.exe 未找到" > /tmp/mql5-ci-output/compile-result.md
+            echo "" >> /tmp/mql5-ci-output/compile-result.md
+            echo "Wine version: $(wine --version 2>&1 || true)" >> /tmp/mql5-ci-output/compile-result.md
+            echo "" >> /tmp/mql5-ci-output/compile-result.md
+            echo "drive_c contents:" >> /tmp/mql5-ci-output/compile-result.md
+            ls -la /tmp/wine-prefix/drive_c/ 2>/dev/null >> /tmp/mql5-ci-output/compile-result.md || true
+            exit 0
           fi
+          
+          echo "MT5 installation SUCCESS"
 
       - name: Compile MQ5
         run: |
           export WINEPREFIX=/tmp/wine-prefix
           export MT5_DIR="$WINEPREFIX/drive_c/MetaTrader5"
           
-          if [ ! -f "$MT5_DIR/metaeditor64.exe" ]; then
-            echo "MT5_NOT_INSTALLED" > /tmp/compile_result.txt
-            echo "ERROR: metaeditor64.exe not found"
-            exit 0
-          fi
+          mkdir -p /tmp/mql5-ci-output
           
           mkdir -p "$MT5_DIR/MQL5/Experts"
           cp "Experts/"* "$MT5_DIR/MQL5/Experts/" 2>/dev/null || true
           
+          echo "=== Compiling ==="
           xvfb-run -s "-screen 0 1024x768x24" wine "$MT5_DIR/metaeditor64.exe" \
             /compile:"$MT5_DIR/MQL5/Experts/中期汇看盘软件 MT5.mq5" \
-            /log:compile.log 2>&1 || true
+            /log:/tmp/mql5-ci-output/compile.log 2>&1 || true
           
-          if [ -f compile.log ]; then
-            cp compile.log /tmp/compile_result.txt
+          echo "=== Compile Result ==="
+          cat /tmp/mql5-ci-output/compile.log 2>/dev/null || echo "No compile log"
+          
+          echo "=== EX5 Check ==="
+          find "$MT5_DIR" -name "*.ex5" 2>/dev/null | while read f; do
+            echo "FOUND: $f ($(stat -c%s "$f" 2>/dev/null || echo 'unknown') bytes)"
+          done || echo "No EX5 found"
+          
+          if [ ! -f "/tmp/mql5-ci-output/compile.log" ]; then
+            echo "No compile log file created" > /tmp/mql5-ci-output/compile-result.md
           else
-            echo "NO_COMPILE_LOG" > /tmp/compile_result.txt
+            cat /tmp/mql5-ci-output/compile.log > /tmp/mql5-ci-output/compile-result.md
           fi
-          
-          echo "=== Compile Log ==="
-          cat /tmp/compile_result.txt
 
-      - name: Create Issue with Compile Log
-        if: always()
-        uses: peter-evans/create-or-update-issue@v4
-        with:
-          title: "MQL5 Compile Log - ${{ github.run_id }}"
-          body: |
-            ## Compile Result
-            ```
-            ${{ steps.compile.outputs.log || 'No log available' }}
-            ```
-          labels: compile-log
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
-      - name: Upload via API
+      - name: Commit Compile Result
         if: always()
         run: |
-          LOG=$(cat /tmp/compile_result.txt 2>/dev/null | head -100)
-          curl -s -X POST \
-            "https://api.github.com/repos/${{ github.repository }}/issues" \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github+json" \
-            -d "{
-              \"title\": \"MQL5 Compile Log - ${{ github.run_id }}\",
-              \"body\": \"\`\`\`\\n$LOG\\n\`\`\`\"
-            }"
+          git config --global user.name "MQL5 CI Bot"
+          git config --global user.email "ci@mql5.local"
+          
+          mkdir -p ci-results
+          cp /tmp/mql5-ci-output/* ci-results/ 2>/dev/null || true
+          
+          git add -A
+          git commit -m "CI compile result - run ${{ github.run_id }}" || echo "No changes to commit"
+          git push origin main || echo "Push failed"
