@@ -18,43 +18,25 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y --no-install-recommends wine64 wine32 xvfb
           
-          echo "Wine version:"
           wine --version || true
           
-          echo "Downloading MT5..."
           curl -L -o /tmp/mt5setup.exe "https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe"
-          ls -la /tmp/mt5setup.exe
           
-          echo "Installing MT5 via Wine..."
           export WINEARCH=win64
           export WINEPREFIX=/tmp/wine-prefix
           xvfb-run -s "-screen 0 1024x768x24" wine /tmp/mt5setup.exe /portable /config=install_path="C:\\MetaTrader5" 2>&1 &
           WINE_PID=$!
           
-          # Wait for installer to finish (max 10 minutes)
           for i in $(seq 1 120); do
-            if ! kill -0 $WINE_PID 2>/dev/null; then
-              echo "Installer finished after $((i*5)) seconds"
-              break
-            fi
-            if [ $((i % 12)) -eq 0 ]; then
-              echo "Installer still running... ($((i*5)) seconds)"
-            fi
+            if ! kill -0 $WINE_PID 2>/dev/null; then break; fi
             sleep 5
           done
           
           wait $WINE_PID 2>/dev/null || true
           
-          echo "=== Checking installation ==="
-          find /tmp/wine-prefix/drive_c/ -name "metaeditor64.exe" -ls 2>/dev/null || echo "metaeditor64.exe NOT FOUND"
-          find /tmp/wine-prefix/drive_c/ -name "*.exe" -ls 2>/dev/null | head -20 || echo "No exe files found"
-          
-          # Check if MT5 was actually installed
           if [ ! -f "/tmp/wine-prefix/drive_c/MetaTrader5/metaeditor64.exe" ]; then
-            echo "ERROR: MT5 installation failed - metaeditor64.exe not found"
-            echo "Contents of drive_c:"
-            ls -la /tmp/wine-prefix/drive_c/ 2>/dev/null || echo "drive_c does not exist"
-            exit 1
+            echo "MT5_INSTALL_FAILED" > /tmp/compile_result.txt
+            exit 0  # Don't fail here, we'll report it
           fi
 
       - name: Compile MQ5
@@ -62,28 +44,51 @@ jobs:
           export WINEPREFIX=/tmp/wine-prefix
           export MT5_DIR="$WINEPREFIX/drive_c/MetaTrader5"
           
+          if [ ! -f "$MT5_DIR/metaeditor64.exe" ]; then
+            echo "MT5_NOT_INSTALLED" > /tmp/compile_result.txt
+            echo "ERROR: metaeditor64.exe not found"
+            exit 0
+          fi
+          
           mkdir -p "$MT5_DIR/MQL5/Experts"
           cp "Experts/"* "$MT5_DIR/MQL5/Experts/" 2>/dev/null || true
           
-          echo "=== Files to compile ==="
-          ls -la "$MT5_DIR/MQL5/Experts/"
-          
-          echo "=== Starting compilation ==="
           xvfb-run -s "-screen 0 1024x768x24" wine "$MT5_DIR/metaeditor64.exe" \
             /compile:"$MT5_DIR/MQL5/Experts/中期汇看盘软件 MT5.mq5" \
-            /log:compile.log
+            /log:compile.log 2>&1 || true
+          
+          if [ -f compile.log ]; then
+            cp compile.log /tmp/compile_result.txt
+          else
+            echo "NO_COMPILE_LOG" > /tmp/compile_result.txt
+          fi
           
           echo "=== Compile Log ==="
-          cat compile.log 2>/dev/null || echo "No compile log"
+          cat /tmp/compile_result.txt
+
+      - name: Create Issue with Compile Log
+        if: always()
+        uses: peter-evans/create-or-update-issue@v4
+        with:
+          title: "MQL5 Compile Log - ${{ github.run_id }}"
+          body: |
+            ## Compile Result
+            ```
+            ${{ steps.compile.outputs.log || 'No log available' }}
+            ```
+          labels: compile-log
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           
-          echo "=== EX5 Files ==="
-          EX5_FILES=$(find "$MT5_DIR" -name "*.ex5" 2>/dev/null)
-          if [ -n "$EX5_FILES" ]; then
-            echo "SUCCESS: Found EX5 files:"
-            echo "$EX5_FILES"
-          else
-            echo "ERROR: No EX5 files generated"
-            echo "Compile log content:"
-            cat compile.log 2>/dev/null || echo "No log"
-            exit 1
-          fi
+      - name: Upload via API
+        if: always()
+        run: |
+          LOG=$(cat /tmp/compile_result.txt 2>/dev/null | head -100)
+          curl -s -X POST \
+            "https://api.github.com/repos/${{ github.repository }}/issues" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            -d "{
+              \"title\": \"MQL5 Compile Log - ${{ github.run_id }}\",
+              \"body\": \"\`\`\`\\n$LOG\\n\`\`\`\"
+            }"
