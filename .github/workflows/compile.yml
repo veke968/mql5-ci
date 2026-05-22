@@ -3,8 +3,6 @@ name: MQL5 Compile
 on:
   push:
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -18,43 +16,44 @@ jobs:
         run: |
           sudo dpkg --add-architecture i386
           sudo apt-get update
-          sudo apt-get install -y wine wine64 wine32
+          sudo apt-get install -y wine wine64 wine32 xvfb
           wine --version
 
-      - name: Download MT5
+      - name: Download MT5 Installer
         run: |
-          curl -L -o mql5setup.exe "https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe"
+          curl -L -o /tmp/mt5setup.exe "https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe"
+          ls -la /tmp/mt5setup.exe
 
-      - name: Install MT5 (headless via Wine)
+      - name: Install MT5 in Wine
         run: |
-          wine mql5setup.exe /portable || true
-          ls -la ~/.wine/drive_c/users/*/AppData/Roaming/MetaQuotes/ 2>/dev/null || echo "checking alternate path..."
-          find /home/runner -name "metaeditor64.exe" 2>/dev/null || echo "not found yet"
+          xvfb-run wine /tmp/mt5setup.exe /portable || true
+          sleep 30
+          # Find MT5 installation
+          find $HOME -name "metaeditor64.exe" 2>/dev/null | head -5
 
-      - name: Find metaeditor64.exe
+      - name: Find MT5 Path
+        id: find-mt5
         run: |
-          export MT5_PATH=$(find /home/runner -name "metaeditor64.exe" 2>/dev/null | head -1 | xargs dirname)
-          echo "MT5_PATH=$MT5_PATH" >> $GITHUB_ENV
-          echo "Found: $MT5_PATH"
+          MT5_PATH=$(find $HOME -name "metaeditor64.exe" 2>/dev/null | head -1 | xargs dirname)
+          echo "MT5_PATH=$MT5_PATH" >> $GITHUB_OUTPUT
+          echo "Found MT5 at: $MT5_PATH"
 
       - name: Compile MQ5
         run: |
-          echo "Compiling: Experts/中期汇看盘软件 MT5.mq5"
-          wine "$MT5_PATH/metaeditor64.exe" /compile:"Experts/中期汇看盘软件 MT5.mq5" /log:compile.log
-
-      - name: Show Results
-        if: always()
-        run: |
+          echo "Compiling file..."
+          xvfb-run wine "${{ steps.find-mt5.outputs.MT5_PATH }}/metaeditor64.exe" /compile:"Experts/中期汇看盘软件 MT5.mq5" /log:compile.log /include:"$HOME/.wine/drive_c/users/runner/AppData/Roaming/MetaQuotes/Terminal/Common" || true
           echo "=== Compile Log ==="
-          cat compile.log 2>/dev/null || echo "No log file"
-          echo "=== EXE files ==="
-          find . -name "*.ex5" 2>/dev/null || echo "No EX5 found"
-          echo "=== Errors ==="
-          grep -i "error" compile.log 2>/dev/null || echo "No errors found"
+          cat compile.log 2>/dev/null || echo "No compile log"
+          echo "=== EX5 Files ==="
+          find . -name "*.ex5" -ls 2>/dev/null || echo "No EX5 found"
+          echo "=== Error Summary ==="
+          grep -i "error\|warning" compile.log 2>/dev/null || echo "No errors in log"
 
-      - name: Upload EX5
-        if: success()
+      - name: Upload Results
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: compiled-ex5
-          path: "**/*.ex5"
+          name: compile-results
+          path: |
+            compile.log
+            **/*.ex5
