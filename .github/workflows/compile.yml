@@ -8,51 +8,29 @@ on:
 jobs:
   compile:
     runs-on: ubuntu-latest
+    container:
+      image: fx369/mql5-build:latest
     
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup MQL5 Compiler (Docker)
-        run: |
-          docker pull ghcr.io/denniswilsmann/mql5-compiler:latest 2>/dev/null || \
-          docker pull denniswilsmann/mql5-compiler:latest 2>/dev/null || \
-          echo "Docker image not available, trying alternative..."
-
-      - name: Install Wine and Download MT5
-        run: |
-          sudo dpkg --add-architecture i386
-          sudo apt-get update -y
-          sudo apt-get install -y --no-install-recommends wine64 wine32 xvfb
-          
-          curl -L -o /tmp/mt5setup.exe "https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe"
-          
-          export WINEARCH=win64
-          export WINEPREFIX=/tmp/wine-prefix
-          timeout 300 xvfb-run -s "-screen 0 1024x768x24" wine /tmp/mt5setup.exe /portable /config=install_path="C:\\MetaTrader5" 2>&1 &
-          WINE_PID=$!
-          wait $WINE_PID 2>/dev/null || true
-          
-          if [ ! -f "/tmp/wine-prefix/drive_c/MetaTrader5/metaeditor64.exe" ]; then
-            echo "ERROR: MT5 installation failed"
-            exit 1
-          fi
-
       - name: Compile MQ5
         run: |
-          export WINEPREFIX=/tmp/wine-prefix
-          MT5_DIR="$WINEPREFIX/drive_c/MetaTrader5"
+          mkdir -p /tmp/mql5-ci-output
           
-          mkdir -p "$MT5_DIR/MQL5/Experts"
-          cp Experts/* "$MT5_DIR/MQL5/Experts/" 2>/dev/null || true
-          
-          xvfb-run -s "-screen 0 1024x768x24" wine "$MT5_DIR/metaeditor64.exe" \
-            /compile:"$MT5_DIR/MQL5/Experts/中期汇看盘软件 MT5.mq5" \
-            /log:/tmp/compile.log
+          echo "=== Compiling 中期汇看盘软件 MT5.mq5 ==="
+          wine "/opt/MetaTrader 5/metaeditor64.exe" \
+            /compile:"/github/workspace/Experts/中期汇看盘软件 MT5.mq5" \
+            /log:/tmp/mql5-ci-output/compile.log 2>&1 || true
           
           echo "=== Compile Log ==="
-          cat /tmp/compile.log 2>/dev/null || echo "No log"
+          cat /tmp/mql5-ci-output/compile.log 2>/dev/null || echo "No log"
           
-          EX5_COUNT=$(find "$MT5_DIR" -name "*.ex5" 2>/dev/null | wc -l)
+          echo "=== EX5 Check ==="
+          EX5_COUNT=$(find /opt -name "*.ex5" 2>/dev/null | wc -l)
+          echo "Found $EX5_COUNT .ex5 files"
+          find /opt -name "*.ex5" 2>/dev/null | head -10
+          
           if [ "$EX5_COUNT" -eq 0 ]; then
             echo "ERROR: No EX5 generated"
             exit 1
