@@ -14,7 +14,6 @@
 #property description "3. EA交易存在风险，使用者需自行承担风险，无论盈亏都与本EA交易面板开发者无关；"
 #property description "4. 使用授权请联系开发者【VX：兆盾科技】"
 //#property icon    "ewm.ico"
-#property strict
 
 #include <Trade\Trade.mqh>
 CTrade myTrade;
@@ -1546,19 +1545,17 @@ void deleteguadan(string 币对="-1",int magic=999)
   {
    while(guadannum(币对,magic)>0)
      {
-      for(int i=0; i<PositionsTotal(); i++)
+      for(int i=0; i<OrdersTotal(); i++)
         {
-         if((ticket=PositionGetTicket(i))>0)
+         ulong orderTicket=OrderGetTicket(i);
+         if(orderTicket>0)
            {
-            if((币对=="-1" || PositionGetString(POSITION_SYMBOL)==币对) && (magic==999 || PositionGetInteger(POSITION_MAGIC)==magic))
+            if((币对=="-1" || OrderGetString(ORDER_SYMBOL)==币对) && (magic==999 || OrderGetInteger(ORDER_MAGIC)==magic))
               {
-               if(PositionGetInteger(POSITION_TYPE)>0)
-                 {
-                  bool res=myTrade.OrderDelete(ticket);
-                  //PlaySound("ok");
-                  if(启动警报)
-                     Alert(Symbol()+"   ---   一键清除所有挂单");
-                 }
+               bool res=myTrade.OrderDelete(orderTicket);
+               //PlaySound("ok");
+               if(启动警报)
+                  Alert(Symbol()+"   ---   一键清除所有挂单");
               }
            }
         }
@@ -1571,13 +1568,15 @@ void deleteguadan(string 币对="-1",int magic=999)
 int guadannum(string 币对="-1",int magic=999)
   {
    int res=0;
-   for(int i=0; i<PositionsTotal(); i++)
+   for(int i=0; i<OrdersTotal(); i++)
      {
-      if((ticket=PositionGetTicket(i))>0)
+      ulong orderTicket=OrderGetTicket(i);
+      if(orderTicket>0)
         {
-         if((币对=="-1" || PositionGetString(POSITION_SYMBOL)==币对) && (magic==999 || PositionGetInteger(POSITION_MAGIC)==magic))
+         if((币对=="-1" || OrderGetString(ORDER_SYMBOL)==币对) && (magic==999 || OrderGetInteger(ORDER_MAGIC)==magic))
            {
-            if(PositionGetInteger(POSITION_TYPE)>1)
+            ENUM_ORDER_TYPE orderType=(ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+            if(orderType==ORDER_TYPE_BUY_STOP || orderType==ORDER_TYPE_SELL_STOP || orderType==ORDER_TYPE_BUY_LIMIT || orderType==ORDER_TYPE_SELL_LIMIT)
               {
                res++;
               }
@@ -1594,20 +1593,19 @@ void deletess(string 币对="-1",int magic=999)    //删除 sell stop挂单
   {
    while(sellstop_number(币对,magic)>0)
      {
-      for(int i=0; i<PositionsTotal(); i++)
+      for(int i=0; i<OrdersTotal(); i++)
         {
-         if((ticket=PositionGetTicket(i))>0)
+         ulong orderTicket=OrderGetTicket(i);
+         if(orderTicket>0)
            {
-            if((币对=="-1" || PositionGetString(POSITION_SYMBOL)==币对) && (magic==999 || PositionGetInteger(POSITION_MAGIC)==magic))
+            if((币对=="-1" || OrderGetString(ORDER_SYMBOL)==币对) && (magic==999 || OrderGetInteger(ORDER_MAGIC)==magic))
               {
-               if(PositionGetInteger(POSITION_TYPE)==ORDER_TYPE_SELL_STOP)
+               if(OrderGetInteger(ORDER_TYPE)==ORDER_TYPE_SELL_STOP)
                  {
-                    {
-                     bool res=myTrade.OrderDelete(ticket);
-                     //PlaySound("ok");
-                     if(启动警报)
-                        Alert(Symbol()+"   ---   删除·SELL STOP·挂单成功");
-                    }
+                    bool res=myTrade.OrderDelete(orderTicket);
+                    //PlaySound("ok");
+                    if(启动警报)
+                       Alert(Symbol()+"   ---   删除·SELL STOP·挂单成功");
                  }
               }
            }
@@ -1621,14 +1619,14 @@ void deletess(string 币对="-1",int magic=999)    //删除 sell stop挂单
 int sellstop_number(string 币对="-1",int magic=999)  //sell stop 挂单计算
   {
    int res=0;
-   for(int i=0; i<PositionsTotal(); i++)
+   for(int i=0; i<OrdersTotal(); i++)
      {
-      if((ticket=PositionGetTicket(i))>0)
+      ulong orderTicket=OrderGetTicket(i);
+      if(orderTicket>0)
         {
-         if((币对=="-1" || PositionGetString(POSITION_SYMBOL)==币对) && (magic==999 || PositionGetInteger(POSITION_MAGIC)==magic))
+         if((币对=="-1" || OrderGetString(ORDER_SYMBOL)==币对) && (magic==999 || OrderGetInteger(ORDER_MAGIC)==magic))
            {
-            //double p=OrderProfit()+OrderCommission()+OrderSwap();
-            if(PositionGetInteger(POSITION_TYPE)==ORDER_TYPE_SELL_STOP)
+            if(OrderGetInteger(ORDER_TYPE)==ORDER_TYPE_SELL_STOP)
               {
                res++;
               }
@@ -1645,20 +1643,19 @@ void deletesl(string 币对="-1",int magic=999)    //删除sell limit挂单
   {
    while(selllimit_number(币对,magic)>0)
      {
-      for(int i=0; i<PositionsTotal(); i++)
+      for(int i=0; i<OrdersTotal(); i++)
         {
-         if((ticket=PositionGetTicket(i))>0)
+         ulong orderTicket=OrderGetTicket(i);
+         if(orderTicket>0)
            {
-            if((币对=="-1" || PositionGetString(POSITION_SYMBOL)==币对) && (magic==999 || PositionGetInteger(POSITION_MAGIC)==magic))
+            if((币对=="-1" || OrderGetString(ORDER_SYMBOL)==币对) && (magic==999 || OrderGetInteger(ORDER_MAGIC)==magic))
               {
-               if(PositionGetInteger(POSITION_TYPE)==ORDER_TYPE_SELL_LIMIT)
+               if(OrderGetInteger(ORDER_TYPE)==ORDER_TYPE_SELL_LIMIT)
                  {
-                    {
-                     bool res=myTrade.OrderDelete(ticket);
-                     //PlaySound("ok");
-                     if(启动警报)
-                        Alert(Symbol()+"   ---   删除·SELL LIMIT·挂单成功");
-                    }
+                    bool res=myTrade.OrderDelete(orderTicket);
+                    //PlaySound("ok");
+                    if(启动警报)
+                       Alert(Symbol()+"   ---   删除·SELL LIMIT·挂单成功");
                  }
               }
            }
@@ -1669,17 +1666,17 @@ void deletesl(string 币对="-1",int magic=999)    //删除sell limit挂单
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-int selllimit_number(string 币对="-1",int magic=999)  //sell stop 挂单计算
+int selllimit_number(string 币对="-1",int magic=999)  //sell limit 挂单计算
   {
    int res=0;
-   for(int i=0; i<PositionsTotal(); i++)
+   for(int i=0; i<OrdersTotal(); i++)
      {
-      if((ticket=PositionGetTicket(i))>0)
+      ulong orderTicket=OrderGetTicket(i);
+      if(orderTicket>0)
         {
-         if((币对=="-1" || PositionGetString(POSITION_SYMBOL)==币对) && (magic==999 || PositionGetInteger(POSITION_MAGIC)==magic))
+         if((币对=="-1" || OrderGetString(ORDER_SYMBOL)==币对) && (magic==999 || OrderGetInteger(ORDER_MAGIC)==magic))
            {
-            //double p=OrderProfit()+OrderCommission()+OrderSwap();
-            if(PositionGetInteger(POSITION_TYPE)==ORDER_TYPE_SELL_LIMIT)
+            if(OrderGetInteger(ORDER_TYPE)==ORDER_TYPE_SELL_LIMIT)
               {
                res++;
               }
@@ -1696,20 +1693,19 @@ void deletebs(string 币对="-1",int magic=999)       //删除 buy stop挂单
   {
    while(buystop_number(币对,magic)>0)
      {
-      for(int i=0; i<PositionsTotal(); i++)
+      for(int i=0; i<OrdersTotal(); i++)
         {
-         if((ticket=PositionGetTicket(i))>0)
+         ulong orderTicket=OrderGetTicket(i);
+         if(orderTicket>0)
            {
-            if((币对=="-1" || PositionGetString(POSITION_SYMBOL)==币对) && (magic==999 || PositionGetInteger(POSITION_MAGIC)==magic))
+            if((币对=="-1" || OrderGetString(ORDER_SYMBOL)==币对) && (magic==999 || OrderGetInteger(ORDER_MAGIC)==magic))
               {
-               if(PositionGetInteger(POSITION_TYPE)==ORDER_TYPE_BUY_STOP)
+               if(OrderGetInteger(ORDER_TYPE)==ORDER_TYPE_BUY_STOP)
                  {
-                    {
-                     bool res=myTrade.OrderDelete(ticket);
-                     //PlaySound("ok");
-                     if(启动警报)
-                        Alert(Symbol()+"   ---   删除·BUY STOP·挂单成功");
-                    }
+                    bool res=myTrade.OrderDelete(orderTicket);
+                    //PlaySound("ok");
+                    if(启动警报)
+                       Alert(Symbol()+"   ---   删除·BUY STOP·挂单成功");
                  }
               }
            }
@@ -1723,14 +1719,14 @@ void deletebs(string 币对="-1",int magic=999)       //删除 buy stop挂单
 int buystop_number(string 币对="-1",int magic=999)  //buy stop 挂单计算
   {
    int res=0;
-   for(int i=0; i<PositionsTotal(); i++)
+   for(int i=0; i<OrdersTotal(); i++)
      {
-      if((ticket=PositionGetTicket(i))>0)
+      ulong orderTicket=OrderGetTicket(i);
+      if(orderTicket>0)
         {
-         if((币对=="-1" || PositionGetString(POSITION_SYMBOL)==币对) && (magic==999 || PositionGetInteger(POSITION_MAGIC)==magic))
+         if((币对=="-1" || OrderGetString(ORDER_SYMBOL)==币对) && (magic==999 || OrderGetInteger(ORDER_MAGIC)==magic))
            {
-            // double p=OrderProfit()+OrderCommission()+OrderSwap();
-            if(PositionGetInteger(POSITION_TYPE)==ORDER_TYPE_BUY_STOP)
+            if(OrderGetInteger(ORDER_TYPE)==ORDER_TYPE_BUY_STOP)
               {
                res++;
               }
@@ -1747,15 +1743,16 @@ void deletebl(string 币对="-1",int magic=999)    //删除 buy limit挂单
   {
    while(buylimit_number(币对,magic)>0)
      {
-      for(int i=0; i<PositionsTotal(); i++)
+      for(int i=0; i<OrdersTotal(); i++)
         {
-         if((ticket=PositionGetTicket(i))>0)
+         ulong orderTicket=OrderGetTicket(i);
+         if(orderTicket>0)
            {
-            if((币对=="-1" || PositionGetString(POSITION_SYMBOL)==币对) && (magic==999 || PositionGetInteger(POSITION_MAGIC)==magic))
+            if((币对=="-1" || OrderGetString(ORDER_SYMBOL)==币对) && (magic==999 || OrderGetInteger(ORDER_MAGIC)==magic))
               {
-               if(PositionGetInteger(POSITION_TYPE)==ORDER_TYPE_BUY_LIMIT)
+               if(OrderGetInteger(ORDER_TYPE)==ORDER_TYPE_BUY_LIMIT)
                  {
-                  bool res=myTrade.OrderDelete(ticket);
+                  bool res=myTrade.OrderDelete(orderTicket);
                   //PlaySound("ok");
                   if(启动警报)
                      Alert(Symbol()+"   ---   删除·BUY LIMIT·挂单成功");
@@ -1769,17 +1766,17 @@ void deletebl(string 币对="-1",int magic=999)    //删除 buy limit挂单
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-int buylimit_number(string 币对="-1",int magic=999)  //buy stop 挂单计算
+int buylimit_number(string 币对="-1",int magic=999)  //buy limit 挂单计算
   {
    int res=0;
-   for(int i=0; i<PositionsTotal(); i++)
+   for(int i=0; i<OrdersTotal(); i++)
      {
-      if((ticket=PositionGetTicket(i))>0)
+      ulong orderTicket=OrderGetTicket(i);
+      if(orderTicket>0)
         {
-         if((币对=="-1" || PositionGetString(POSITION_SYMBOL)==币对) && (magic==999 || PositionGetInteger(POSITION_MAGIC)==magic))
+         if((币对=="-1" || OrderGetString(ORDER_SYMBOL)==币对) && (magic==999 || OrderGetInteger(ORDER_MAGIC)==magic))
            {
-            // double p=OrderProfit()+OrderCommission()+OrderSwap();
-            if(PositionGetInteger(POSITION_TYPE)==ORDER_TYPE_BUY_LIMIT)
+            if(OrderGetInteger(ORDER_TYPE)==ORDER_TYPE_BUY_LIMIT)
               {
                res++;
               }
@@ -2389,7 +2386,7 @@ int sell_VOL(string 币对="-1",int magic=999)
 int number()
   {
    int res=0;
-   for(int i=0; i<ObjectsTotal() && IsStopped()==FALSE; i++)
+   for(int i=0; i<ObjectsTotal(0) && IsStopped()==FALSE; i++)
      {
       string objname=ObjectName(0,i);
       string mm=IntegerToString(i);
