@@ -1,0 +1,87 @@
+name: MQL5 Compile
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Wine and Download MT5
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends wine64 wine32 xvfb
+          
+          wine --version || true
+          
+          curl -L -o /tmp/mt5setup.exe "https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe"
+          
+          export WINEARCH=win64
+          export WINEPREFIX=/tmp/wine-prefix
+          xvfb-run -s "-screen 0 1024x768x24" wine /tmp/mt5setup.exe /portable /config=install_path="C:\\MetaTrader5" 2>&1 &
+          WINE_PID=$!
+          
+          for i in $(seq 1 120); do
+            if ! kill -0 $WINE_PID 2>/dev/null; then break; fi
+            sleep 5
+          done
+          
+          wait $WINE_PID 2>/dev/null || true
+          
+          if [ ! -f "/tmp/wine-prefix/drive_c/MetaTrader5/metaeditor64.exe" ]; then
+            echo "MT5 installation FAILED - metaeditor64.exe not found"
+            mkdir -p /tmp/mql5-ci-output
+            echo "MT5安装失败" > /tmp/mql5-ci-output/compile-result.md
+            exit 1
+          fi
+          
+          echo "MT5 installation SUCCESS"
+
+      - name: Compile MQ5
+        run: |
+          export WINEPREFIX=/tmp/wine-prefix
+          export MT5_DIR="$WINEPREFIX/drive_c/MetaTrader5"
+          
+          mkdir -p /tmp/mql5-ci-output
+          mkdir -p "$MT5_DIR/MQL5/Experts"
+          cp Experts/* "$MT5_DIR/MQL5/Experts/" 2>/dev/null || true
+          
+          echo "=== Compiling ==="
+          xvfb-run -s "-screen 0 1024x768x24" wine "$MT5_DIR/metaeditor64.exe" \
+            /compile:"$MT5_DIR/MQL5/Experts/中期汇看盘软件 MT5.mq5" \
+            /log:/tmp/mql5-ci-output/compile.log
+          
+          echo "=== Compile Log ==="
+          cat /tmp/mql5-ci-output/compile.log 2>/dev/null || echo "No compile log"
+          
+          echo "=== EX5 Check ==="
+          find "$MT5_DIR" -name "*.ex5" 2>/dev/null | while read f; do
+            echo "FOUND: $f ($(stat -c%s "$f" 2>/dev/null || echo unknown) bytes)"
+          done
+          
+          EX5_COUNT=$(find "$MT5_DIR" -name "*.ex5" 2>/dev/null | wc -l)
+          if [ "$EX5_COUNT" -eq 0 ]; then
+            echo "NO EX5 GENERATED - compilation likely failed"
+            exit 1
+          fi
+          
+          cp /tmp/mql5-ci-output/compile.log /tmp/mql5-ci-output/compile-result.md 2>/dev/null || true
+
+      - name: Commit Compile Result
+        if: always()
+        run: |
+          git config --global user.name "MQL5 CI Bot"
+          git config --global user.email "ci@mql5.local"
+          
+          mkdir -p ci-results
+          cp /tmp/mql5-ci-output/* ci-results/ 2>/dev/null || true
+          
+          git add -A
+          git commit -m "CI compile result - run ${{ github.run_id }}" || echo "No changes to commit"
+          git push origin main || echo "Push failed"
