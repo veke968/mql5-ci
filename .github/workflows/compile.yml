@@ -8,57 +8,43 @@ on:
 jobs:
   compile:
     runs-on: ubuntu-latest
+    container:
+      image: fx369/mql5-build:latest
     timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Docker
+      - name: Compile MQ5
         run: |
-          # Use a community Docker image with MT5 pre-installed
-          docker pull ghcr.io/dingmaotu/mql5-sdk:latest || true
-
-      - name: Compile with Docker MT5
-        run: |
-          # Find the .mq5 file
+          set -e
+          # Find .mq5 file
           MQ5_FILE=$(find . -name "*.mq5" -type f | head -1)
           if [ -z "$MQ5_FILE" ]; then
             echo "ERROR: No .mq5 file found!"
             exit 1
           fi
-          echo "Compiling: $MQ5_FILE"
+          echo "Found: $MQ5_FILE"
+          echo "Compiling..."
 
-          ABS_PATH=$(realpath "$MQ5_FILE")
-          DIR=$(dirname "$ABS_PATH")
+          # Try wine metaeditor64.exe (container should have it)
+          wine metaeditor64.exe /compile:"$MQ5_FILE" /log:compile.log 2>&1 || true
 
-          # Try ghcr.io/dingmaotu/mql5-sdk first, fall back to fx369/mql5-build
-          for IMAGE in "ghcr.io/dingmaotu/mql5-sdk:latest" "fx369/mql5-build:latest"; do
-            echo "Trying image: $IMAGE"
-            if docker pull "$IMAGE" 2>/dev/null; then
-              echo "Using image: $IMAGE"
-              docker run --rm -v "$DIR":/data -w /data "$IMAGE" metaeditor64.exe /compile:"$MQ5_FILE" /log:/data/compile.log 2>&1 || true
-              break
-            fi
-          done
-
-          # Show compile log
           if [ -f compile.log ]; then
             echo "=== Compile Log ==="
             cat compile.log
           fi
 
-          # Check for EX5
           EX5_FILE="${MQ5_FILE%.mq5}.ex5"
           if [ -f "$EX5_FILE" ]; then
-            echo "SUCCESS: EX5 generated"
+            echo "SUCCESS: $EX5_FILE generated"
             ls -la "$EX5_FILE"
           else
-            # Search for any .ex5 file
             FOUND=$(find . -name "*.ex5" -type f | head -1)
             if [ -n "$FOUND" ]; then
-              echo "EX5 found at: $FOUND"
+              echo "EX5 found: $FOUND"
             else
-              echo "ERROR: No EX5 generated. Check compile log for errors."
+              echo "ERROR: No EX5 generated"
               exit 1
             fi
           fi
