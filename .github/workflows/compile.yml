@@ -7,52 +7,38 @@ on:
 
 jobs:
   compile:
-    runs-on: ubuntu-latest
-    container:
-      image: fx369/mql5-build:latest
+    runs-on: windows-latest
     timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Compile MQ5
+      - name: Compile MQL5
+        uses: fx31337/mql-compile-action@v1.0.0
+        with:
+          path: '.'
+          include: '.'
+          init-platform: true
+          verbose: true
+
+      - name: Show compile log
+        if: always()
         run: |
-          set -e
-          # Find .mq5 file
-          MQ5_FILE=$(find . -name "*.mq5" -type f | head -1)
-          if [ -z "$MQ5_FILE" ]; then
-            echo "ERROR: No .mq5 file found!"
-            exit 1
-          fi
-          echo "Found: $MQ5_FILE"
-          echo "Compiling..."
-
-          # Try wine metaeditor64.exe (container should have it)
-          wine metaeditor64.exe /compile:"$MQ5_FILE" /log:compile.log 2>&1 || true
-
-          if [ -f compile.log ]; then
-            echo "=== Compile Log ==="
-            cat compile.log
-          fi
-
-          EX5_FILE="${MQ5_FILE%.mq5}.ex5"
-          if [ -f "$EX5_FILE" ]; then
-            echo "SUCCESS: $EX5_FILE generated"
-            ls -la "$EX5_FILE"
-          else
-            FOUND=$(find . -name "*.ex5" -type f | head -1)
-            if [ -n "$FOUND" ]; then
-              echo "EX5 found: $FOUND"
-            else
-              echo "ERROR: No EX5 generated"
-              exit 1
-            fi
-          fi
+          if (Test-Path "mql.log") {
+            Get-Content "mql.log"
+          }
+          $ex5Files = Get-ChildItem -Path . -Filter "*.ex5" -Recurse -ErrorAction SilentlyContinue
+          if ($ex5Files) {
+            Write-Host "=== Generated EX5 files ==="
+            $ex5Files | ForEach-Object { Write-Host "$($_.FullName) ($($_.Length) bytes)" }
+          } else {
+            Write-Host "No EX5 files found"
+          }
 
       - name: Upload EX5
         uses: actions/upload-artifact@v4
         with:
           name: compiled-ea
           path: "**/*.ex5"
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 30
