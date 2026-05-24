@@ -7,116 +7,66 @@ on:
 
 jobs:
   compile:
-    runs-on: windows-latest
-    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download and Install MT5
+      - name: Set up Docker
         run: |
-          # Download MT5 installer
-          Invoke-WebRequest -Uri "https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe" -OutFile "mt5setup.exe"
-          
-          # Verysilent install (no UI, works in headless CI)
-          Write-Host "Starting MT5 installation (this may take 5-10 minutes)..."
-          $process = Start-Process -FilePath "mt5setup.exe" -ArgumentList "/VERYSILENT", "/NORESTART" -Wait -PassThru -Timeout 600
-          Write-Host "Installer exit code: $($process.ExitCode)"
-          
-          # If process timed out, try alternative approach
-          if ($process.ExitCode -eq -1) {
-            Write-Host "Installer timed out, attempting to find installed files anyway..."
-          }
-          
-          # Find metaeditor64.exe
-          $mePath = ""
-          $searchPaths = @(
-            "C:\Program Files\MetaTrader 5",
-            "C:\Program Files (x86)\MetaTrader 5",
-            "$env:ProgramFiles\MetaTrader 5",
-            "${env:ProgramFiles(x86)}\MetaTrader 5"
-          )
-          foreach ($basePath in $searchPaths) {
-            if (Test-Path $basePath) {
-              $me = Get-ChildItem -Path $basePath -Filter "metaeditor64.exe" -Recurse -ErrorAction SilentlyContinue -Depth 2 | Select-Object -First 1
-              if ($me) {
-                $mePath = $me.FullName
-                break
-              }
-            }
-          }
-          
-          if (-not $mePath) {
-            Write-Host "Searching entire C: drive (slow)..."
-            $me = Get-ChildItem -Path "C:\Program Files" -Filter "metaeditor64.exe" -Recurse -ErrorAction SilentlyContinue -Depth 4 | Select-Object -First 1
-            if ($me) { $mePath = $me.FullName }
-          }
-          
-          if (-not $mePath) {
-            Write-Host "ERROR: metaeditor64.exe not found!"
-            Get-ChildItem -Path "C:\Program Files" -Directory -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "Dir: $($_.FullName)" }
-            exit 1
-          }
-          
-          Write-Host "Found: $mePath"
-          echo "ME_PATH=$mePath" >> $env:GITHUB_ENV
+          # Use a community Docker image with MT5 pre-installed
+          docker pull ghcr.io/dingmaotu/mql5-sdk:latest || true
 
-      - name: Compile MQ5
+      - name: Compile with Docker MT5
         run: |
-          $mePath = $env:ME_PATH
-          
           # Find the .mq5 file
-          $srcFiles = Get-ChildItem -Path . -Filter "*.mq5" -Recurse
-          if ($srcFiles.Count -eq 0) {
-            Write-Host "ERROR: No .mq5 file found!"
+          MQ5_FILE=$(find . -name "*.mq5" -type f | head -1)
+          if [ -z "$MQ5_FILE" ]; then
+            echo "ERROR: No .mq5 file found!"
             exit 1
-          }
-          $srcFile = $srcFiles | Select-Object -First 1
-          Write-Host "Compiling: $($srcFile.FullName)"
-          
-          $compileLog = "$PWD\compile.log"
-          
-          # Run compilation with timeout
-          $process = Start-Process -FilePath $mePath -ArgumentList "/compile:$($srcFile.FullName)", "/log:$compileLog" -NoNewWindow -Wait -PassThru
-          Write-Host "Compiler exit code: $($process.ExitCode)"
-          
+          fi
+          echo "Compiling: $MQ5_FILE"
+
+          ABS_PATH=$(realpath "$MQ5_FILE")
+          DIR=$(dirname "$ABS_PATH")
+
+          # Try ghcr.io/dingmaotu/mql5-sdk first, fall back to fx369/mql5-build
+          for IMAGE in "ghcr.io/dingmaotu/mql5-sdk:latest" "fx369/mql5-build:latest"; do
+            echo "Trying image: $IMAGE"
+            if docker pull "$IMAGE" 2>/dev/null; then
+              echo "Using image: $IMAGE"
+              docker run --rm -v "$DIR":/data -w /data "$IMAGE" metaeditor64.exe /compile:"$MQ5_FILE" /log:/data/compile.log 2>&1 || true
+              break
+            fi
+          done
+
           # Show compile log
-          if (Test-Path $compileLog) {
-            Write-Host "=== Compile Log ==="
-            Get-Content $compileLog
-          }
-          
+          if [ -f compile.log ]; then
+            echo "=== Compile Log ==="
+            cat compile.log
+          fi
+
           # Check for EX5
-          $ex5File = $srcFile.FullName -replace '\.mq5$', '.ex5'
-          Write-Host "Looking for: $ex5File"
-          
-          if (Test-Path $ex5File) {
-            Write-Host "SUCCESS: EX5 generated"
-            Write-Host "Size: $((Get-Item $ex5File).Length) bytes"
-          } else {
-            $anyEx5 = Get-ChildItem -Path . -Filter "*.ex5" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($anyEx5) {
-              Write-Host "EX5 found at: $($anyEx5.FullName)"
-            } else {
-              Write-Host "ERROR: No EX5 generated. Check compile log for errors."
+          EX5_FILE="${MQ5_FILE%.mq5}.ex5"
+          if [ -f "$EX5_FILE" ]; then
+            echo "SUCCESS: EX5 generated"
+            ls -la "$EX5_FILE"
+          else
+            # Search for any .ex5 file
+            FOUND=$(find . -name "*.ex5" -type f | head -1)
+            if [ -n "$FOUND" ]; then
+              echo "EX5 found at: $FOUND"
+            else
+              echo "ERROR: No EX5 generated. Check compile log for errors."
               exit 1
-            }
-          }
-          
-          # Fail on errors in log
-          if (Test-Path $compileLog) {
-            $errorLines = Select-String -Path $compileLog -Pattern "^\s*\d+:\s*\d+\s+error" -CaseSensitive:$false
-            if ($errorLines) {
-              Write-Host "COMPILE ERRORS:"
-              $errorLines | ForEach-Object { Write-Host $_.Line }
-              exit 1
-            }
-          }
+            fi
+          fi
 
       - name: Upload EX5
         uses: actions/upload-artifact@v4
         with:
           name: compiled-ea
-          path: "*.ex5"
+          path: "**/*.ex5"
           if-no-files-found: error
           retention-days: 30
