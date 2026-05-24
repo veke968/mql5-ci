@@ -8,7 +8,7 @@ on:
 jobs:
   compile:
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
@@ -18,9 +18,15 @@ jobs:
           # Download MT5 installer
           Invoke-WebRequest -Uri "https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe" -OutFile "mt5setup.exe"
           
-          # Silent install with proper flags
-          $process = Start-Process -FilePath "mt5setup.exe" -ArgumentList "/INSTALL", "/SILENT", "/NORESTART", "/SUPPRESSMSGBOXES" -NoNewWindow -Wait -PassThru
+          # Verysilent install (no UI, works in headless CI)
+          Write-Host "Starting MT5 installation (this may take 5-10 minutes)..."
+          $process = Start-Process -FilePath "mt5setup.exe" -ArgumentList "/VERYSILENT", "/NORESTART" -Wait -PassThru -Timeout 600
           Write-Host "Installer exit code: $($process.ExitCode)"
+          
+          # If process timed out, try alternative approach
+          if ($process.ExitCode -eq -1) {
+            Write-Host "Installer timed out, attempting to find installed files anyway..."
+          }
           
           # Find metaeditor64.exe
           $mePath = ""
