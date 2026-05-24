@@ -8,33 +8,57 @@ on:
 jobs:
   compile:
     runs-on: windows-latest
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download MT5 Installer
+      - name: Download and Install MT5
         run: |
-          Invoke-WebRequest -Uri "https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/metaeditor5setup.exe" -OutFile "mt5setup.exe"
-          Write-Host "Download complete: $(Get-Item mt5setup.exe | Measure-Object -Property Length -Sum | Select -Expand Sum) bytes"
-
-      - name: Install MT5 (Silent)
-        run: |
-          Start-Process -FilePath "mt5setup.exe" -ArgumentList "/install","/quiet" -NoNewWindow -Wait
+          # Download MT5 installer
+          Invoke-WebRequest -Uri "https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe" -OutFile "mt5setup.exe"
+          
+          # Silent install with proper flags
+          $process = Start-Process -FilePath "mt5setup.exe" -ArgumentList "/INSTALL", "/SILENT", "/NORESTART", "/SUPPRESSMSGBOXES" -NoNewWindow -Wait -PassThru
+          Write-Host "Installer exit code: $($process.ExitCode)"
+          
           # Find metaeditor64.exe
-          $me = Get-ChildItem -Path "C:\Program Files\MetaTrader 5" -Filter "metaeditor64.exe" -Recurse -ErrorAction SilentlyContinue -Depth 3 | Select-Object -First 1
-          if (-not $me) {
-            $me = Get-ChildItem -Path "$env:LOCALAPPDATA\MetaTrader 5" -Filter "metaeditor64.exe" -Recurse -ErrorAction SilentlyContinue -Depth 3 | Select-Object -First 1
+          $mePath = ""
+          $searchPaths = @(
+            "C:\Program Files\MetaTrader 5",
+            "C:\Program Files (x86)\MetaTrader 5",
+            "$env:ProgramFiles\MetaTrader 5",
+            "${env:ProgramFiles(x86)}\MetaTrader 5"
+          )
+          foreach ($basePath in $searchPaths) {
+            if (Test-Path $basePath) {
+              $me = Get-ChildItem -Path $basePath -Filter "metaeditor64.exe" -Recurse -ErrorAction SilentlyContinue -Depth 2 | Select-Object -First 1
+              if ($me) {
+                $mePath = $me.FullName
+                break
+              }
+            }
           }
-          if (-not $me) {
+          
+          if (-not $mePath) {
+            Write-Host "Searching entire C: drive (slow)..."
+            $me = Get-ChildItem -Path "C:\Program Files" -Filter "metaeditor64.exe" -Recurse -ErrorAction SilentlyContinue -Depth 4 | Select-Object -First 1
+            if ($me) { $mePath = $me.FullName }
+          }
+          
+          if (-not $mePath) {
             Write-Host "ERROR: metaeditor64.exe not found!"
-            Get-ChildItem -Path "C:\Program Files" -Filter "metaeditor64.exe" -Recurse -ErrorAction SilentlyContinue -Depth 5 | ForEach-Object { Write-Host "Found: $($_.FullName)" }
+            Get-ChildItem -Path "C:\Program Files" -Directory -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "Dir: $($_.FullName)" }
             exit 1
           }
-          Write-Host "Found metaeditor64.exe: $($me.FullName)"
-          echo "ME_PATH=$($me.FullName)" >> $env:GITHUB_ENV
+          
+          Write-Host "Found: $mePath"
+          echo "ME_PATH=$mePath" >> $env:GITHUB_ENV
 
       - name: Compile MQ5
         run: |
+          $mePath = $env:ME_PATH
+          
           # Find the .mq5 file
           $srcFiles = Get-ChildItem -Path . -Filter "*.mq5" -Recurse
           if ($srcFiles.Count -eq 0) {
@@ -42,45 +66,43 @@ jobs:
             exit 1
           }
           $srcFile = $srcFiles | Select-Object -First 1
-          Write-Host "Compiling: $($srcFile.Name) at $($srcFile.FullName)"
-
-          $mePath = $env:ME_PATH
+          Write-Host "Compiling: $($srcFile.FullName)"
+          
           $compileLog = "$PWD\compile.log"
-
-          # Run compilation
+          
+          # Run compilation with timeout
           $process = Start-Process -FilePath $mePath -ArgumentList "/compile:$($srcFile.FullName)", "/log:$compileLog" -NoNewWindow -Wait -PassThru
-          Write-Host "Exit code: $($process.ExitCode)"
-
-          # Show log
+          Write-Host "Compiler exit code: $($process.ExitCode)"
+          
+          # Show compile log
           if (Test-Path $compileLog) {
             Write-Host "=== Compile Log ==="
             Get-Content $compileLog
           }
-
-          # Check for EX5 output
+          
+          # Check for EX5
           $ex5File = $srcFile.FullName -replace '\.mq5$', '.ex5'
-          Write-Host "Expected EX5 path: $ex5File"
-
+          Write-Host "Looking for: $ex5File"
+          
           if (Test-Path $ex5File) {
-            Write-Host "SUCCESS: EX5 generated at $ex5File"
-            Write-Host "File size: $((Get-Item $ex5File).Length) bytes"
+            Write-Host "SUCCESS: EX5 generated"
+            Write-Host "Size: $((Get-Item $ex5File).Length) bytes"
           } else {
-            # Search for any .ex5
             $anyEx5 = Get-ChildItem -Path . -Filter "*.ex5" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
             if ($anyEx5) {
               Write-Host "EX5 found at: $($anyEx5.FullName)"
             } else {
-              Write-Host "ERROR: No EX5 file generated! Check compile log for errors."
+              Write-Host "ERROR: No EX5 generated. Check compile log for errors."
               exit 1
             }
           }
-
-          # Fail on any compile errors in the log
+          
+          # Fail on errors in log
           if (Test-Path $compileLog) {
-            $errors = Select-String -Path $compileLog -Pattern "error" -CaseSensitive:$false
-            if ($errors) {
-              Write-Host "ERROR: Compile log contains errors:"
-              $errors | ForEach-Object { Write-Host $_.Line }
+            $errorLines = Select-String -Path $compileLog -Pattern "^\s*\d+:\s*\d+\s+error" -CaseSensitive:$false
+            if ($errorLines) {
+              Write-Host "COMPILE ERRORS:"
+              $errorLines | ForEach-Object { Write-Host $_.Line }
               exit 1
             }
           }
